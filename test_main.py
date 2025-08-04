@@ -14,7 +14,7 @@ def mock_reddit_api():
             json={"access_token": "test_token", "token_type": "bearer", "expires_in": 3600},
         )
         m.get(
-            "https://oauth.reddit.com/r/python/hot",
+            "https://oauth.reddit.com/search",
             json={
                 "data": {
                     "children": [
@@ -42,7 +42,7 @@ def test_read_index():
     assert "<h1>Reddit Summarizer</h1>" in response.text
 
 
-@patch("main.openai.chat.completions.create")
+@patch("main.client.chat.completions.create")
 def test_summarize_endpoint(mock_openai_create, mock_reddit_api):
     mock_openai_create.return_value.choices[0].message.content = "This is a summary."
 
@@ -55,7 +55,8 @@ def test_summarize_endpoint(mock_openai_create, mock_reddit_api):
     mock_openai_create.assert_called_once()
     args, kwargs = mock_openai_create.call_args
     messages = kwargs["messages"]
-    assert "Summarize the following Reddit posts" in messages[1]["content"]
+    assert "Summarize the following Reddit posts on the topic 'python'" in messages[1]["content"]
+    assert "Highlight key opinions, major concerns, and recurring themes" in messages[1]["content"]
     assert "Title: Post 1" in messages[1]["content"]
     assert "Text: This is the first post." in messages[1]["content"]
     assert "Title: Post 2" in messages[1]["content"]
