@@ -1,6 +1,5 @@
 import os
 import requests
-import openai
 import logging
 import time
 from fastapi import FastAPI, HTTPException, Request
@@ -24,16 +23,14 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-cache = {}
-CACHE_TTL = 300
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Environment variables
+HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
 
 required_env_vars = [
-    ("OPENAI_API_KEY", OPENAI_API_KEY),
+    ("HUGGINGFACE_API_TOKEN", HUGGINGFACE_API_TOKEN),
     ("REDDIT_CLIENT_ID", REDDIT_CLIENT_ID),
     ("REDDIT_CLIENT_SECRET", REDDIT_CLIENT_SECRET),
     ("REDDIT_USER_AGENT", REDDIT_USER_AGENT),
@@ -43,7 +40,10 @@ for var_name, value in required_env_vars:
     if not value:
         raise EnvironmentError(f"Missing required environment variable: {var_name}")
 
-client = openai.OpenAI(api_key=OPENAI_API_KEY)
+HUGGINGFACE_API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+
+cache = {}
+CACHE_TTL = 300  # seconds
 
 
 class SummaryRequest(BaseModel):
@@ -55,9 +55,7 @@ class SummaryResponse(BaseModel):
 
 
 def is_valid_topic(topic: str):
-    if not topic or not topic.strip() or len(topic.strip()) < 3:
-        return False
-    return True
+    return bool(topic and topic.strip() and len(topic.strip()) >= 3)
 
 
 def get_reddit_posts(topic: str, limit: int = 5):
@@ -95,35 +93,54 @@ def get_reddit_posts(topic: str, limit: int = 5):
         and not post["data"].get("is_video", False)
         and post["data"].get("post_hint") != "link"
     ]
-    logger.info(f"Found {len(filtered_posts)} filtered posts")
+    logger.info(f"Filtered to {len(filtered_posts)} meaningful posts")
+    if not filtered_posts:
+        raise HTTPException(status_code=404, detail="No meaningful Reddit posts found for this topic.")
     return filtered_posts
 
 
 def summarize_text(posts: list, topic: str):
-    if not posts:
-        return "No meaningful posts found to summarize."
     if topic in cache:
         summary, timestamp = cache[topic]
         if time.time() - timestamp < CACHE_TTL:
             logger.info(f"Returning cached summary for topic: {topic}")
             return summary
 
-    prompt = (
-        f"Summarize the following Reddit posts on the topic '{topic}'.\n"
-        f"Highlight key opinions, major concerns, and recurring themes:\n\n"
-    )
-    for post in posts:
-        prompt += f"Title: {post['title']}\n"
-        prompt += f"Text: {post['text']}\n\n"
+    prompt_intro = f"Summarize the following Reddit posts on the topic '{topic}':\n\n"
 
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",  # switched from gpt-4 to gpt-3.5-turbo
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that summarizes text."},
-            {"role": "user", "content": prompt},
-        ],
-    )
-    summary = response.choices[0].message.content
+    max_input_length = 3000  # max characters for input to HF API
+    content = prompt_intro
+    for post in posts:
+        post_text = f"Title: {post['title']}\nText: {post['text']}\n\n"
+        if len(content) + len(post_text) > max_input_length:
+            break
+        content += post_text
+
+    headers = {
+        "Authorization": f"Bearer {HUGGINGFACE_API_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "inputs": content,
+        "parameters": {"max_length": 150, "do_sample": False},
+    }
+
+    try:
+        response = requests.post(HUGGINGFACE_API_URL, headers=headers, json=payload)
+        if response.status_code != 200:
+            logger.error(f"Hugging Face API error: {response.status_code} - {response.text}")
+            raise HTTPException(status_code=502, detail="Error generating summary from Hugging Face API.")
+
+        data = response.json()
+        if isinstance(data, list) and len(data) > 0 and "summary_text" in data[0]:
+            summary = data[0]["summary_text"]
+        else:
+            logger.error(f"Unexpected Hugging Face API response format: {data}")
+            summary = "No summary generated."
+    except Exception as e:
+        logger.error(f"Exception calling Hugging Face API: {e}")
+        raise HTTPException(status_code=502, detail="Error generating summary from Hugging Face API.")
+
     cache[topic] = (summary, time.time())
     return summary
 
@@ -175,4 +192,5 @@ async def summarize_post(request: Request, summary_request: SummaryRequest):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
