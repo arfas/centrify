@@ -117,7 +117,7 @@ def summarize_text(posts: list, topic: str):
         prompt += f"Text: {post['text']}\n\n"
 
     response = client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-3.5-turbo",  # switched from gpt-4 to gpt-3.5-turbo
         messages=[
             {"role": "system", "content": "You are a helpful assistant that summarizes text."},
             {"role": "user", "content": prompt},
