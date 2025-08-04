@@ -21,7 +21,7 @@ app = FastAPI()
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/", StaticFiles(directory="frontend/build", html=True), name="static")
 
 # Environment variables
 HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
@@ -143,11 +143,6 @@ def summarize_text(posts: list, topic: str):
 
     cache[topic] = (summary, time.time())
     return summary
-
-
-@app.get("/", response_class=FileResponse)
-async def read_index():
-    return FileResponse("static/index.html")
 
 
 @app.get("/summarize", response_model=SummaryResponse)
