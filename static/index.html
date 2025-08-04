@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reddit Summarizer</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 2em;
+        }
+        #summary {
+            margin-top: 1em;
+            padding: 1em;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Reddit Summarizer</h1>
+    <form id="topic-form">
+        <label for="topic">Enter a topic:</label>
+        <input type="text" id="topic" name="topic" required>
+        <button type="submit">Summarize</button>
+    </form>
+    <div id="summary"></div>
+
+    <script>
+        const form = document.getElementById('topic-form');
+        const summaryDiv = document.getElementById('summary');
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const topic = event.target.elements.topic.value;
+            summaryDiv.innerHTML = 'Loading...';
+
+            try {
+                const response = await fetch(`/summarize?topic=${topic}`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    summaryDiv.innerHTML = data.summary;
+                } else {
+                    summaryDiv.innerHTML = `Error: ${data.detail}`;
+                }
+            } catch (error) {
+                summaryDiv.innerHTML = `Error: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -36,6 +36,12 @@ def mock_reddit_api():
         )
         yield m
 
+def test_read_index():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "<h1>Reddit Summarizer</h1>" in response.text
+
+
 @patch("main.openai.chat.completions.create")
 def test_summarize_endpoint(mock_openai_create, mock_reddit_api):
     mock_openai_create.return_value.choices[0].message.content = "This is a summary."

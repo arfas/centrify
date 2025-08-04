@@ -2,12 +2,16 @@ import os
 import requests
 import openai
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv()
 
 app = FastAPI()
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
@@ -66,6 +70,11 @@ def summarize_text(posts: list):
     return response.choices[0].message.content
 
 
+@app.get("/", response_class=FileResponse)
+async def read_index():
+    return "static/index.html"
+
+
 @app.get("/summarize", response_model=SummaryResponse)
 async def summarize(topic: str):
     try:
@@ -76,6 +85,7 @@ async def summarize(topic: str):
         raise HTTPException(status_code=e.response.status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn
