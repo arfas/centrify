@@ -18,13 +18,16 @@ REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
 
-openai.api_key = OPENAI_API_KEY
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
 
 class SummaryRequest(BaseModel):
     topic: str
 
+
 class SummaryResponse(BaseModel):
     summary: str
+
 
 def get_reddit_posts(topic: str, limit: int = 5):
     auth = requests.auth.HTTPBasicAuth(REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET)
@@ -40,10 +43,10 @@ def get_reddit_posts(topic: str, limit: int = 5):
     res.raise_for_status()
     access_token = res.json()["access_token"]
 
-    # Get top posts
+    # Search for posts
     headers["Authorization"] = f"bearer {access_token}"
-    url = f"https://oauth.reddit.com/r/{topic}/hot"
-    params = {"limit": limit}
+    url = "https://oauth.reddit.com/search"
+    params = {"q": topic, "limit": limit, "sort": "top", "type": "link"}
     res = requests.get(url, headers=headers, params=params)
     res.raise_for_status()
 
@@ -54,13 +57,16 @@ def get_reddit_posts(topic: str, limit: int = 5):
     ]
 
 
-def summarize_text(posts: list):
-    prompt = "Summarize the following Reddit posts into key insights:\n\n"
+def summarize_text(posts: list, topic: str):
+    prompt = (
+        f"Summarize the following Reddit posts on the topic '{topic}'.\n"
+        f"Highlight key opinions, major concerns, and recurring themes:\n\n"
+    )
     for post in posts:
         prompt += f"Title: {post['title']}\n"
         prompt += f"Text: {post['text']}\n\n"
 
-    response = openai.chat.completions.create(
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=[
             {"role": "system", "content": "You are a helpful assistant that summarizes text."},
@@ -72,14 +78,14 @@ def summarize_text(posts: list):
 
 @app.get("/", response_class=FileResponse)
 async def read_index():
-    return "static/index.html"
+    return FileResponse("static/index.html")
 
 
 @app.get("/summarize", response_model=SummaryResponse)
 async def summarize(topic: str):
     try:
         posts = get_reddit_posts(topic)
-        summary = summarize_text(posts)
+        summary = summarize_text(posts, topic)
         return {"summary": summary}
     except requests.exceptions.HTTPError as e:
         raise HTTPException(status_code=e.response.status_code, detail=str(e))
