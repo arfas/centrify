@@ -6,3 +6,4 @@ uvicorn
 pytest
 requests-mock
 slowapi
+beautifulsoup4

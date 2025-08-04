@@ -10,6 +10,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from bs4 import BeautifulSoup
 
 load_dotenv()
 
@@ -48,21 +49,81 @@ CACHE_TTL = 300  # seconds
 
 class SummaryRequest(BaseModel):
     topic: str
+    summary_format: str = "text"
+    sentiment_analysis: bool = False
 
 
 class SummaryResponse(BaseModel):
     summary: str
 
 
+class UrlRequest(BaseModel):
+    url: str
+
+
+class TextRequest(BaseModel):
+    text: str
+
+
+@app.post("/summarize-url", response_model=SummaryResponse)
+@limiter.limit("5/minute")
+async def summarize_url(request: Request, url_request: UrlRequest):
+    try:
+        res = requests.get(url_request.url)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, 'html.parser')
+        text = soup.get_text()
+        summary = summarize_text([{"title": url_request.url, "text": text}], "URL Content")
+        return {"summary": summary}
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"HTTPError in summarize_url: {e}")
+        raise HTTPException(status_code=502, detail="Error fetching data from URL.")
+    except Exception as e:
+        logger.error(f"Exception in summarize_url: {e}")
+        raise HTTPException(status_code=500, detail=f"Error generating summary: {e}")
+
+
+@app.post("/summarize-text", response_model=SummaryResponse)
+@limiter.limit("5/minute")
+async def summarize_text_endpoint(request: Request, text_request: TextRequest):
+    try:
+        summary = summarize_text([{"title": "Raw Text", "text": text_request.text}], "Raw Text")
+        return {"summary": summary}
+    except Exception as e:
+        logger.error(f"Exception in summarize_text_endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Error generating summary: {e}")
+
+
 def is_valid_topic(topic: str):
     return bool(topic and topic.strip() and len(topic.strip()) >= 3)
+
+
+async def get_hacker_news_posts(limit: int = 5):
+    try:
+        res = requests.get("https://hacker-news.firebaseio.com/v0/topstories.json")
+        res.raise_for_status()
+        top_stories_ids = res.json()
+
+        posts = []
+        for story_id in top_stories_ids[:limit]:
+            story_res = requests.get(f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json")
+            story_res.raise_for_status()
+            story_data = story_res.json()
+            if story_data.get("text"):
+                posts.append({"title": story_data["title"], "text": story_data["text"]})
+        return posts
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"HTTPError in get_hacker_news_posts: {e}")
+        raise HTTPException(status_code=502, detail="Error fetching data from Hacker News.")
+    except Exception as e:
+        logger.error(f"Exception in get_hacker_news_posts: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching data from Hacker News: {e}")
 
 
 def get_reddit_posts(topic: str, limit: int = 5):
     auth = requests.auth.HTTPBasicAuth(REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET)
     headers = {"User-Agent": REDDIT_USER_AGENT}
 
-    # Get an access token
     res = requests.post(
         "https://www.reddit.com/api/v1/access_token",
         auth=auth,
@@ -72,7 +133,6 @@ def get_reddit_posts(topic: str, limit: int = 5):
     res.raise_for_status()
     access_token = res.json()["access_token"]
 
-    # Search for posts
     headers["Authorization"] = f"bearer {access_token}"
     url = "https://oauth.reddit.com/search"
     params = {"q": topic, "limit": limit, "sort": "top", "type": "link"}
@@ -99,17 +159,29 @@ def get_reddit_posts(topic: str, limit: int = 5):
     return filtered_posts
 
 
-def summarize_text(posts: list, topic: str):
+def summarize_text(posts: list, topic: str, summary_format: str = "text", sentiment_analysis: bool = False):
+    if not posts:
+        return "No meaningful posts found to summarize."
+
     if topic in cache:
         summary, timestamp = cache[topic]
         if time.time() - timestamp < CACHE_TTL:
             logger.info(f"Returning cached summary for topic: {topic}")
             return summary
 
-    prompt_intro = f"Summarize the following Reddit posts on the topic '{topic}':\n\n"
+    prompt = f"Summarize the following posts on the topic '{topic}'."
+    if summary_format == "bullets":
+        prompt += " Use bullet points."
+    elif summary_format == "tldr":
+        prompt += " Provide a TL;DR."
 
-    max_input_length = 3000  # max characters for input to HF API
-    content = prompt_intro
+    if sentiment_analysis:
+        prompt += " Also, provide a sentiment analysis (positive, negative, or neutral)."
+
+    prompt += "\n\n"
+
+    max_input_length = 3000
+    content = prompt
     for post in posts:
         post_text = f"Title: {post['title']}\nText: {post['text']}\n\n"
         if len(content) + len(post_text) > max_input_length:
@@ -145,15 +217,45 @@ def summarize_text(posts: list, topic: str):
     return summary
 
 
+@app.get("/trending-topics")
+async def get_trending_topics():
+    try:
+        headers = {"User-Agent": REDDIT_USER_AGENT}
+        res = requests.get("https://www.reddit.com/api/trending_subreddits.json", headers=headers)
+        res.raise_for_status()
+        data = res.json()
+        return [f"r/{subreddit}" for subreddit in data["subreddit_names"]]
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"HTTPError in get_trending_topics: {e}")
+        raise HTTPException(status_code=502, detail="Error fetching trending topics from Reddit.")
+    except Exception as e:
+        logger.error(f"Exception in get_trending_topics: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching trending topics: {e}")
+
+
+@app.get("/summarize-hackernews", response_model=SummaryResponse)
+@limiter.limit("5/minute")
+async def summarize_hackernews(request: Request):
+    try:
+        posts = await get_hacker_news_posts()
+        summary = summarize_text(posts, "Hacker News")
+        return {"summary": summary}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Exception in summarize_hackernews: {e}")
+        raise HTTPException(status_code=500, detail=f"Error generating summary: {e}")
+
+
 @app.get("/summarize", response_model=SummaryResponse)
 @limiter.limit("5/minute")
-async def summarize_get(request: Request, topic: str):
+async def summarize_get(request: Request, topic: str, summary_format: str = "text", sentiment_analysis: bool = False):
     if not is_valid_topic(topic):
         raise HTTPException(status_code=400, detail="Topic must be a non-empty string with at least 3 characters.")
     logger.info(f"Received GET request for topic: {topic}")
     try:
         posts = get_reddit_posts(topic)
-        summary = summarize_text(posts, topic)
+        summary = summarize_text(posts, topic, summary_format, sentiment_analysis)
         return {"summary": summary}
     except HTTPException as e:
         raise e
@@ -173,7 +275,7 @@ async def summarize_post(request: Request, summary_request: SummaryRequest):
     logger.info(f"Received POST request for topic: {summary_request.topic}")
     try:
         posts = get_reddit_posts(summary_request.topic)
-        summary = summarize_text(posts, summary_request.topic)
+        summary = summarize_text(posts, summary_request.topic, summary_request.summary_format, summary_request.sentiment_analysis)
         return {"summary": summary}
     except HTTPException as e:
         raise e
