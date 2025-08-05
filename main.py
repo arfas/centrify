@@ -12,8 +12,12 @@ from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
+from apscheduler.schedulers.background import BackgroundScheduler
+from database import init_db, get_summary_from_db, save_summary_to_db
 
 load_dotenv()
+
+init_db()
 
 limiter = Limiter(key_func=get_remote_address)
 logging.basicConfig(level=logging.INFO)
@@ -56,6 +60,7 @@ class SummaryRequest(BaseModel):
 class Post(BaseModel):
     title: str
     text: str
+    url: str
 
 class SummaryResponse(BaseModel):
     summary: str
@@ -78,7 +83,7 @@ async def summarize_url(request: Request, url_request: UrlRequest):
         res.raise_for_status()
         soup = BeautifulSoup(res.text, 'html.parser')
         text = soup.get_text()
-        posts = [{"title": url_request.url, "text": text}]
+        posts = [{"title": url_request.url, "text": text, "url": url_request.url}]
         summary, ui_summary = summarize_text(posts, "URL Content")
         return {"summary": summary, "ui_summary": ui_summary, "posts": posts}
     except requests.exceptions.HTTPError as e:
@@ -92,7 +97,7 @@ async def summarize_url(request: Request, url_request: UrlRequest):
 @limiter.limit("5/minute")
 async def summarize_text_endpoint(request: Request, text_request: TextRequest):
     try:
-        posts = [{"title": "Raw Text", "text": text_request.text}]
+        posts = [{"title": "Raw Text", "text": text_request.text, "url": ""}]
         summary, ui_summary = summarize_text(posts, "Raw Text")
         return {"summary": summary, "ui_summary": ui_summary, "posts": posts}
     except Exception as e:
@@ -118,7 +123,7 @@ async def get_hacker_news_posts(limit: int = 5):
             story_res.raise_for_status()
             story_data = story_res.json()
             if story_data.get("text"):
-                posts.append({"title": story_data["title"], "text": story_data["text"]})
+                posts.append({"title": story_data["title"], "text": story_data["text"], "url": story_data.get("url", "")})
         return posts
     except requests.exceptions.HTTPError as e:
         logger.error(f"HTTPError in get_hacker_news_posts: {e}")
@@ -155,7 +160,7 @@ def get_reddit_posts(topic: str, limit: int = 5):
         raise HTTPException(status_code=404, detail="No Reddit posts found for this topic.")
 
     filtered_posts = [
-        {"title": post["data"]["title"], "text": post["data"].get("selftext", "")}
+        {"title": post["data"]["title"], "text": post["data"].get("selftext", ""), "url": post["data"].get("url", "")}
         for post in posts
         if post["data"].get("selftext", "").strip()
         and len(post["data"].get("selftext", "").strip()) >= 20
@@ -173,8 +178,9 @@ def summarize_text(posts: list, topic: str, summary_format: str = "text", sentim
 
     # Check cache first
     cache_key = f"{topic}-{summary_format}-{sentiment_analysis}"
-    if cache_key in cache:
-        summary, ui_summary, timestamp = cache[cache_key]
+    cached_summary = get_summary_from_db(cache_key)
+    if cached_summary:
+        summary, ui_summary, timestamp = cached_summary
         if time.time() - timestamp < CACHE_TTL:
             logger.info(f"Returning cached summary for topic: {topic}")
             return summary, ui_summary
@@ -219,7 +225,7 @@ def summarize_text(posts: list, topic: str, summary_format: str = "text", sentim
     )
     ui_summary = ui_summary_response.choices[0].message.content
 
-    cache[cache_key] = (summary, ui_summary, time.time())
+    save_summary_to_db(cache_key, summary, ui_summary, time.time())
     return summary, ui_summary
 
 
@@ -295,4 +301,20 @@ async def summarize_post(request: Request, summary_request: SummaryRequest):
 
 if __name__ == "__main__":
     import uvicorn
+
+    def summarize_trending_topics():
+        logger.info("Starting daily summary of trending topics...")
+        try:
+            trending_topics = requests.get("https://www.reddit.com/api/trending_subreddits.json", headers={"User-Agent": REDDIT_USER_AGENT}).json()["subreddit_names"]
+            for topic in trending_topics:
+                posts = get_reddit_posts(f"r/{topic}")
+                summarize_text(posts, f"r/{topic}")
+            logger.info("Finished daily summary of trending topics.")
+        except Exception as e:
+            logger.error(f"Error in summarize_trending_topics: {e}")
+
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(summarize_trending_topics, 'interval', days=1)
+    scheduler.start()
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

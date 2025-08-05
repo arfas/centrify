@@ -203,7 +203,7 @@ function App() {
         </form>
         {history.length > 0 && (
           <div className="mt-4">
-            <h2 className="text-xl font-bold mb-2">History</h2>
+            <h2 className="text-xl font-bold mb-2">Recent Topics</h2>
             <div className="flex flex-wrap gap-2">
               {history.map((item, index) => (
                 <button
@@ -237,7 +237,11 @@ function App() {
             <div className="space-y-4">
               {posts.map((post, index) => (
                 <div key={index} className="p-4 bg-gray-200 dark:bg-gray-700 rounded-lg">
-                  <h3 className="font-bold">{post.title}</h3>
+                  <h3 className="font-bold">
+                    <a href={post.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                      {post.title}
+                    </a>
+                  </h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400">{post.text}</p>
                 </div>
               ))}
