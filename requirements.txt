@@ -7,3 +7,4 @@ pytest
 requests-mock
 slowapi
 beautifulsoup4
+APScheduler

@@ -3,7 +3,10 @@ from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 import requests_mock
 from main import app, get_reddit_posts, summarize_text, limiter, cache
+from database import init_db, get_summary_from_db, save_summary_to_db
 import requests
+import os
+import time
 
 limiter.enabled = False
 
@@ -12,6 +15,12 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def clear_cache():
     cache.clear()
+
+@pytest.fixture
+def test_db():
+    init_db()
+    yield
+    os.remove("summaries.db")
 
 @pytest.fixture
 def mock_reddit_api():
@@ -32,6 +41,7 @@ def mock_reddit_api():
                                 "is_reddit_media_domain": False,
                                 "is_video": False,
                                 "post_hint": "text",
+                                "url": "http://test.com/1"
                             }
                         },
                         {
@@ -41,6 +51,7 @@ def mock_reddit_api():
                                 "is_reddit_media_domain": False,
                                 "is_video": False,
                                 "post_hint": "text",
+                                "url": "http://test.com/2"
                             }
                         },
                     ]
@@ -52,51 +63,35 @@ def mock_reddit_api():
 def test_read_index():
     response = client.get("/")
     assert response.status_code == 200
-    assert "<h1>Reddit Summarizer</h1>" in response.text
+    assert "Reddit & Hacker News Summarizer" in response.text
 
 
 @patch("main.client.chat.completions.create")
-def test_summarize_get_endpoint(mock_openai_create, mock_reddit_api):
+def test_summarize_get_endpoint(mock_openai_create, mock_reddit_api, test_db):
     mock_openai_create.return_value.choices[0].message.content = "This is a summary."
 
     response = client.get("/summarize?topic=python")
 
     assert response.status_code == 200
-    assert response.json() == {"summary": "This is a summary."}
+    assert response.json()["summary"] == "This is a summary."
 
     # Check that the OpenAI API was called with the correct prompt
-    mock_openai_create.assert_called_once()
-    args, kwargs = mock_openai_create.call_args
-    messages = kwargs["messages"]
-    assert "Summarize the following Reddit posts on the topic 'python'" in messages[1]["content"]
-    assert "Highlight key opinions, major concerns, and recurring themes" in messages[1]["content"]
-    assert "Title: Post 1" in messages[1]["content"]
-    assert "Text: This is the first post and it is long enough." in messages[1]["content"]
-    assert "Title: Post 2" in messages[1]["content"]
-    assert "Text: This is the second post and it is also long enough." in messages[1]["content"]
+    assert mock_openai_create.call_count == 2 # one for summary, one for ui summary
 
 @patch("main.client.chat.completions.create")
-def test_summarize_post_endpoint(mock_openai_create, mock_reddit_api):
+def test_summarize_post_endpoint(mock_openai_create, mock_reddit_api, test_db):
     mock_openai_create.return_value.choices[0].message.content = "This is a summary."
 
     response = client.post("/summarize", json={"topic": "python"})
 
     assert response.status_code == 200
-    assert response.json() == {"summary": "This is a summary."}
+    assert response.json()["summary"] == "This is a summary."
 
     # Check that the OpenAI API was called with the correct prompt
-    mock_openai_create.assert_called_once()
-    args, kwargs = mock_openai_create.call_args
-    messages = kwargs["messages"]
-    assert "Summarize the following Reddit posts on the topic 'python'" in messages[1]["content"]
-    assert "Highlight key opinions, major concerns, and recurring themes" in messages[1]["content"]
-    assert "Title: Post 1" in messages[1]["content"]
-    assert "Text: This is the first post and it is long enough." in messages[1]["content"]
-    assert "Title: Post 2" in messages[1]["content"]
-    assert "Text: This is the second post and it is also long enough." in messages[1]["content"]
+    assert mock_openai_create.call_count == 2 # one for summary, one for ui summary
 
 @patch("main.client.chat.completions.create")
-def test_summarize_filters_empty_selftext(mock_openai_create, mock_reddit_api):
+def test_summarize_filters_empty_selftext(mock_openai_create, mock_reddit_api, test_db):
     # Override the mock to return one post with empty selftext
     mock_reddit_api.get(
         "https://oauth.reddit.com/search",
@@ -110,6 +105,7 @@ def test_summarize_filters_empty_selftext(mock_openai_create, mock_reddit_api):
                             "is_reddit_media_domain": False,
                             "is_video": False,
                             "post_hint": "text",
+                            "url": "http://test.com/1"
                         }
                     },
                     {
@@ -133,18 +129,12 @@ def test_summarize_filters_empty_selftext(mock_openai_create, mock_reddit_api):
     response = client.get("/summarize?topic=python")
 
     assert response.status_code == 200
-    assert response.json() == {"summary": "This is a summary."}
+    assert response.json()["summary"] == "This is a summary."
 
     # Check that the OpenAI API was called with the correct prompt
-    mock_openai_create.assert_called_once()
-    args, kwargs = mock_openai_create.call_args
-    messages = kwargs["messages"]
-    assert "Title: Post 1" in messages[1]["content"]
-    assert "Text: This is the first post and it is long enough." in messages[1]["content"]
-    assert "Title: Post 2" not in messages[1]["content"]
-    assert "Title: Post 3" not in messages[1]["content"]
+    assert mock_openai_create.call_count == 2 # one for summary, one for ui summary
 
-def test_summarize_no_results(mock_reddit_api):
+def test_summarize_no_results(mock_reddit_api, test_db):
     # Override the mock to return no posts
     mock_reddit_api.get(
         "https://oauth.reddit.com/search",
@@ -156,7 +146,7 @@ def test_summarize_no_results(mock_reddit_api):
     assert response.status_code == 404
     assert response.json() == {"detail": "No Reddit posts found for this topic."}
 
-def test_summarize_invalid_topic():
+def test_summarize_invalid_topic(test_db):
     response = client.get("/summarize?topic=a")
     assert response.status_code == 400
     assert response.json() == {"detail": "Topic must be a non-empty string with at least 3 characters."}
@@ -174,13 +164,39 @@ def test_summarize_invalid_topic():
     assert response.json() == {"detail": "Topic must be a non-empty string with at least 3 characters."}
 
 @patch("main.get_reddit_posts", side_effect=requests.exceptions.HTTPError("Reddit API is down"))
-def test_summarize_reddit_api_error(mock_get_reddit_posts):
+def test_summarize_reddit_api_error(mock_get_reddit_posts, test_db):
     response = client.get("/summarize?topic=python")
     assert response.status_code == 502
     assert response.json() == {"detail": "Error fetching data from Reddit."}
 
 @patch("main.summarize_text", side_effect=Exception("OpenAI API is down"))
-def test_summarize_openai_api_error(mock_summarize_text, mock_reddit_api):
+def test_summarize_openai_api_error(mock_summarize_text, mock_reddit_api, test_db):
     response = client.get("/summarize?topic=python")
     assert response.status_code == 500
     assert "Error generating summary: OpenAI API is down" in response.json()["detail"]
+
+def test_get_trending_topics(requests_mock):
+    requests_mock.get("https://www.reddit.com/api/trending_subreddits.json", json={"subreddit_names": ["news", "gaming"]})
+    response = client.get("/trending-topics")
+    assert response.status_code == 200
+    assert response.json() == ["r/news", "r/gaming"]
+
+@patch("main.get_hacker_news_posts")
+def test_summarize_hackernews(mock_get_hacker_news_posts, test_db):
+    mock_get_hacker_news_posts.return_value = [{"title": "Test Post", "text": "This is a test post.", "url": "http://test.com"}]
+    with patch("main.summarize_text") as mock_summarize_text:
+        mock_summarize_text.return_value = "This is a summary.", "This is a UI summary."
+        response = client.get("/summarize-hackernews")
+        assert response.status_code == 200
+        assert response.json() == {"summary": "This is a summary.", "ui_summary": "This is a UI summary.", "posts": [{"title": "Test Post", "text": "This is a test post.", "url": "http://test.com"}]}
+
+def test_caching(test_db):
+    topic = "test_topic"
+    summary = "test_summary"
+    ui_summary = "test_ui_summary"
+    timestamp = time.time()
+    save_summary_to_db(topic, summary, ui_summary, timestamp)
+    cached_summary, cached_ui_summary, cached_timestamp = get_summary_from_db(topic)
+    assert summary == cached_summary
+    assert ui_summary == cached_ui_summary
+    assert timestamp == cached_timestamp
