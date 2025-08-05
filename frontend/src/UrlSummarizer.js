@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-function UrlSummarizer({ setSummary, setLoading }) {
+function UrlSummarizer({ setSummary, setUiSummary, setPosts, setLoading }) {
   const [input, setInput] = useState('');
   const [inputType, setInputType] = useState('url');
 
@@ -8,6 +8,8 @@ function UrlSummarizer({ setSummary, setLoading }) {
     e.preventDefault();
     setLoading(true);
     setSummary('');
+    setUiSummary('');
+    setPosts([]);
 
     const endpoint = inputType === 'url' ? '/summarize-url' : '/summarize-text';
     const payload = inputType === 'url' ? { url: input } : { text: input };
@@ -22,6 +24,8 @@ function UrlSummarizer({ setSummary, setLoading }) {
       });
       const data = await response.json();
       setSummary(data.summary);
+      setUiSummary(data.ui_summary);
+      setPosts(data.posts);
     } catch (error) {
       console.error(`Error fetching ${inputType} summary:`, error);
       setSummary(`Failed to generate ${inputType} summary.`);

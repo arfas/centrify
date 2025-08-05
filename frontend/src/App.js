@@ -7,6 +7,8 @@ const Select = window.ReactSelect;
 function App() {
   const [topic, setTopic] = useState(null);
   const [summary, setSummary] = useState('');
+  const [uiSummary, setUiSummary] = useState('');
+  const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [words, setWords] = useState([]);
   const [darkMode, setDarkMode] = useState(false);
@@ -61,12 +63,16 @@ function App() {
     if (!topic) return;
     setLoading(true);
     setSummary('');
+    setUiSummary('');
+    setPosts([]);
     setWords([]);
 
     try {
       const response = await fetch(`/summarize?topic=${topic.value}&summary_format=${summaryFormat}&sentiment_analysis=${sentimentAnalysis}`);
       const data = await response.json();
       setSummary(data.summary);
+      setUiSummary(data.ui_summary);
+      setPosts(data.posts);
       if (topic.value && !history.includes(topic.value)) {
         const newHistory = [topic.value, ...history].slice(0, 5);
         setHistory(newHistory);
@@ -83,6 +89,8 @@ function App() {
   const handleHackerNewsSummary = async () => {
     setLoading(true);
     setSummary('');
+    setUiSummary('');
+    setPosts([]);
     setWords([]);
     setTopic(null);
 
@@ -90,6 +98,8 @@ function App() {
       const response = await fetch('/summarize-hackernews');
       const data = await response.json();
       setSummary(data.summary);
+      setUiSummary(data.ui_summary);
+      setPosts(data.posts);
     } catch (error) {
       console.error('Error fetching Hacker News summary:', error);
       setSummary('Failed to generate Hacker News summary.');
@@ -110,6 +120,11 @@ function App() {
       </div>
       <div className="max-w-md w-full bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md">
         <h1 className="text-2xl font-bold text-center mb-4">Reddit & Hacker News Summarizer</h1>
+        {uiSummary && !loading && (
+          <div className="p-4 bg-blue-100 dark:bg-blue-900 rounded-lg mb-4">
+            <p className="text-center">{uiSummary}</p>
+          </div>
+        )}
         <div className="flex justify-center mb-4 space-x-2">
           <button
             onClick={handleHackerNewsSummary}
@@ -125,7 +140,7 @@ function App() {
             {showUrlSummarizer ? 'Hide' : 'Summarize URL/Text'}
           </button>
         </div>
-        {showUrlSummarizer && <UrlSummarizer setSummary={setSummary} setLoading={setLoading} />}
+        {showUrlSummarizer && <UrlSummarizer setSummary={setSummary} setUiSummary={setUiSummary} setPosts={setPosts} setLoading={setLoading} />}
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label htmlFor="topic" className="block text-gray-700 dark:text-gray-300 font-bold mb-2">
@@ -213,6 +228,19 @@ function App() {
             <p>{summary}</p>
             <div style={{ height: 300, width: '100%' }}>
               <WordCloud words={words} />
+            </div>
+          </div>
+        )}
+        {posts.length > 0 && !loading && (
+          <div className="mt-4">
+            <h2 className="text-xl font-bold mb-2">Posts</h2>
+            <div className="space-y-4">
+              {posts.map((post, index) => (
+                <div key={index} className="p-4 bg-gray-200 dark:bg-gray-700 rounded-lg">
+                  <h3 className="font-bold">{post.title}</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">{post.text}</p>
+                </div>
+              ))}
             </div>
           </div>
         )}
