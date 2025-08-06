@@ -55,6 +55,7 @@ class SummaryRequest(BaseModel):
     topic: str
     summary_format: str = "text"
     sentiment_analysis: bool = False
+    summary_length: str = "medium"
 
 
 class Post(BaseModel):
@@ -66,6 +67,7 @@ class SummaryResponse(BaseModel):
     summary: str
     ui_summary: str
     posts: list[Post]
+    timestamp: float
 
 
 class UrlRequest(BaseModel):
@@ -85,7 +87,7 @@ async def summarize_url(request: Request, url_request: UrlRequest):
         text = soup.get_text()
         posts = [{"title": url_request.url, "text": text, "url": url_request.url}]
         summary, ui_summary = summarize_text(posts, "URL Content")
-        return {"summary": summary, "ui_summary": ui_summary, "posts": posts}
+        return {"summary": summary, "ui_summary": ui_summary, "posts": posts, "timestamp": time.time()}
     except requests.exceptions.HTTPError as e:
         logger.error(f"HTTPError in summarize_url: {e}")
         raise HTTPException(status_code=502, detail="Error fetching data from URL.")
@@ -99,7 +101,7 @@ async def summarize_text_endpoint(request: Request, text_request: TextRequest):
     try:
         posts = [{"title": "Raw Text", "text": text_request.text, "url": ""}]
         summary, ui_summary = summarize_text(posts, "Raw Text")
-        return {"summary": summary, "ui_summary": ui_summary, "posts": posts}
+        return {"summary": summary, "ui_summary": ui_summary, "posts": posts, "timestamp": time.time()}
     except Exception as e:
         logger.error(f"Exception in summarize_text_endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Error generating summary: {e}")
@@ -172,12 +174,12 @@ def get_reddit_posts(topic: str, limit: int = 5):
     return filtered_posts
 
 
-def summarize_text(posts: list, topic: str, summary_format: str = "text", sentiment_analysis: bool = False):
+def summarize_text(posts: list, topic: str, summary_format: str = "text", sentiment_analysis: bool = False, summary_length: str = "medium"):
     if not posts:
         return "No meaningful posts found to summarize.", ""
 
     # Check cache first
-    cache_key = f"{topic}-{summary_format}-{sentiment_analysis}"
+    cache_key = f"{topic}-{summary_format}-{sentiment_analysis}-{summary_length}"
     cached_summary = get_summary_from_db(cache_key)
     if cached_summary:
         summary, ui_summary, timestamp = cached_summary
@@ -194,6 +196,13 @@ def summarize_text(posts: list, topic: str, summary_format: str = "text", sentim
 
     if sentiment_analysis:
         prompt += " Also, provide a sentiment analysis (positive, negative, or neutral)."
+
+    if summary_length == "short":
+        prompt += " The summary should be about 50 words."
+    elif summary_length == "long":
+        prompt += " The summary should be about 200 words."
+    else:
+        prompt += " The summary should be about 100 words."
 
     prompt += "\n\n"
 
@@ -251,7 +260,7 @@ async def summarize_hackernews(request: Request):
     try:
         posts = await get_hacker_news_posts()
         summary, ui_summary = summarize_text(posts, "Hacker News")
-        return {"summary": summary, "ui_summary": ui_summary, "posts": posts}
+        return {"summary": summary, "ui_summary": ui_summary, "posts": posts, "timestamp": time.time()}
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -261,14 +270,14 @@ async def summarize_hackernews(request: Request):
 
 @app.get("/summarize", response_model=SummaryResponse)
 @limiter.limit("5/minute")
-async def summarize_get(request: Request, topic: str, summary_format: str = "text", sentiment_analysis: bool = False):
+async def summarize_get(request: Request, topic: str, summary_format: str = "text", sentiment_analysis: bool = False, summary_length: str = "medium"):
     if not is_valid_topic(topic):
         raise HTTPException(status_code=400, detail="Topic must be a non-empty string with at least 3 characters.")
     logger.info(f"Received GET request for topic: {topic}")
     try:
         posts = get_reddit_posts(topic)
-        summary, ui_summary = summarize_text(posts, topic, summary_format, sentiment_analysis)
-        return {"summary": summary, "ui_summary": ui_summary, "posts": posts}
+        summary, ui_summary = summarize_text(posts, topic, summary_format, sentiment_analysis, summary_length)
+        return {"summary": summary, "ui_summary": ui_summary, "posts": posts, "timestamp": time.time()}
     except HTTPException as e:
         raise e
     except requests.exceptions.HTTPError as e:
@@ -287,8 +296,8 @@ async def summarize_post(request: Request, summary_request: SummaryRequest):
     logger.info(f"Received POST request for topic: {summary_request.topic}")
     try:
         posts = get_reddit_posts(summary_request.topic)
-        summary, ui_summary = summarize_text(posts, summary_request.topic, summary_request.summary_format, summary_request.sentiment_analysis)
-        return {"summary": summary, "ui_summary": ui_summary, "posts": posts}
+        summary, ui_summary = summarize_text(posts, summary_request.topic, summary_request.summary_format, summary_request.sentiment_analysis, summary_request.summary_length)
+        return {"summary": summary, "ui_summary": ui_summary, "posts": posts, "timestamp": time.time()}
     except HTTPException as e:
         raise e
     except requests.exceptions.HTTPError as e:

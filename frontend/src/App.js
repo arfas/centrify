@@ -16,7 +16,10 @@ function App() {
   const [trendingTopics, setTrendingTopics] = useState([]);
   const [summaryFormat, setSummaryFormat] = useState('text');
   const [sentimentAnalysis, setSentimentAnalysis] = useState(false);
+  const [summaryLength, setSummaryLength] = useState('medium');
   const [showUrlSummarizer, setShowUrlSummarizer] = useState(false);
+  const [error, setError] = useState('');
+  const [timestamp, setTimestamp] = useState(null);
 
   useEffect(() => {
     const fetchTrendingTopics = async () => {
@@ -60,53 +63,74 @@ function App() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!topic) return;
+    if (!topic || !topic.value.trim()) {
+      setError('Please enter a valid topic.');
+      return;
+    }
+    setError('');
     setLoading(true);
     setSummary('');
     setUiSummary('');
     setPosts([]);
     setWords([]);
+    setTimestamp(null);
 
     try {
-      const response = await fetch(`/summarize?topic=${topic.value}&summary_format=${summaryFormat}&sentiment_analysis=${sentimentAnalysis}`);
+      const response = await fetch(`/summarize?topic=${topic.value.trim()}&summary_format=${summaryFormat}&sentiment_analysis=${sentimentAnalysis}&summary_length=${summaryLength}`);
       const data = await response.json();
-      setSummary(data.summary);
-      setUiSummary(data.ui_summary);
-      setPosts(data.posts);
-      if (topic.value && !history.includes(topic.value)) {
-        const newHistory = [topic.value, ...history].slice(0, 5);
-        setHistory(newHistory);
-        localStorage.setItem('topicHistory', JSON.stringify(newHistory));
+      if (response.ok && data.summary?.trim()) {
+        setSummary(data.summary);
+        setUiSummary(data.ui_summary);
+        setPosts(data.posts);
+        setTimestamp(data.timestamp);
+        if (topic.value.trim() && !history.includes(topic.value.trim())) {
+          const newHistory = [topic.value.trim(), ...history].slice(0, 5);
+          setHistory(newHistory);
+          localStorage.setItem('topicHistory', JSON.stringify(newHistory));
+        }
+      } else {
+        setError(`No summary found for topic "${topic.value.trim()}".`);
       }
     } catch (error) {
       console.error('Error fetching summary:', error);
-      setSummary('Failed to generate summary.');
+      setError('Failed to generate summary.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleHackerNewsSummary = async () => {
+    setError('');
     setLoading(true);
     setSummary('');
     setUiSummary('');
     setPosts([]);
     setWords([]);
     setTopic(null);
+    setTimestamp(null);
 
     try {
       const response = await fetch('/summarize-hackernews');
       const data = await response.json();
-      setSummary(data.summary);
-      setUiSummary(data.ui_summary);
-      setPosts(data.posts);
+      if (response.ok && data.summary?.trim()) {
+        setSummary(data.summary);
+        setUiSummary(data.ui_summary);
+        setPosts(data.posts);
+        setTimestamp(data.timestamp);
+      } else {
+        setError('No summary found for Hacker News.');
+      }
     } catch (error) {
       console.error('Error fetching Hacker News summary:', error);
-      setSummary('Failed to generate Hacker News summary.');
+      setError('Failed to generate Hacker News summary.');
     } finally {
       setLoading(false);
     }
   };
+
+  const escapeHTML = (str) => {
+    return str.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex items-center justify-center">
@@ -120,9 +144,14 @@ function App() {
       </div>
       <div className="max-w-md w-full bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md">
         <h1 className="text-2xl font-bold text-center mb-4">Reddit & Hacker News Summarizer</h1>
+        {error && (
+          <div className="p-4 bg-red-100 dark:bg-red-900 rounded-lg mb-4">
+            <p className="text-center text-red-700 dark:text-red-300">{error}</p>
+          </div>
+        )}
         {uiSummary && !loading && (
           <div className="p-4 bg-blue-100 dark:bg-blue-900 rounded-lg mb-4">
-            <p className="text-center">{uiSummary}</p>
+            <p className="text-center" dangerouslySetInnerHTML={{ __html: escapeHTML(uiSummary) }}></p>
           </div>
         )}
         <div className="flex justify-center mb-4 space-x-2">
@@ -140,7 +169,7 @@ function App() {
             {showUrlSummarizer ? 'Hide' : 'Summarize URL/Text'}
           </button>
         </div>
-        {showUrlSummarizer && <UrlSummarizer setSummary={setSummary} setUiSummary={setUiSummary} setPosts={setPosts} setLoading={setLoading} />}
+        {showUrlSummarizer && <UrlSummarizer setSummary={setSummary} setUiSummary={setUiSummary} setPosts={setPosts} setLoading={setLoading} setError={setError} setTimestamp={setTimestamp} />}
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label htmlFor="topic" className="block text-gray-700 dark:text-gray-300 font-bold mb-2">
@@ -193,6 +222,44 @@ function App() {
               <label htmlFor="sentiment">Sentiment Analysis</label>
             </div>
           </div>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center">
+              <input
+                id="short"
+                type="radio"
+                name="length"
+                value="short"
+                checked={summaryLength === 'short'}
+                onChange={(e) => setSummaryLength(e.target.value)}
+                className="mr-2"
+              />
+              <label htmlFor="short">Short</label>
+            </div>
+            <div className="flex items-center">
+              <input
+                id="medium"
+                type="radio"
+                name="length"
+                value="medium"
+                checked={summaryLength === 'medium'}
+                onChange={(e) => setSummaryLength(e.target.value)}
+                className="mr-2"
+              />
+              <label htmlFor="medium">Medium</label>
+            </div>
+            <div className="flex items-center">
+              <input
+                id="long"
+                type="radio"
+                name="length"
+                value="long"
+                checked={summaryLength === 'long'}
+                onChange={(e) => setSummaryLength(e.target.value)}
+                className="mr-2"
+              />
+              <label htmlFor="long">Long</label>
+            </div>
+          </div>
           <button
             type="submit"
             className="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600"
@@ -224,8 +291,11 @@ function App() {
         )}
         {summary && !loading && WordCloud && (
           <div className="mt-4 p-4 bg-gray-200 dark:bg-gray-700 rounded-lg">
-            <h2 className="text-xl font-bold mb-2">Summary</h2>
-            <p>{summary}</p>
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="text-xl font-bold">Summary</h2>
+              {timestamp && <span className="text-sm text-gray-500 dark:text-gray-400">{new Date(timestamp * 1000).toLocaleString()}</span>}
+            </div>
+            <p dangerouslySetInnerHTML={{ __html: escapeHTML(summary) }}></p>
             <div style={{ height: 300, width: '100%' }}>
               <WordCloud words={words} />
             </div>
@@ -238,11 +308,10 @@ function App() {
               {posts.map((post, index) => (
                 <div key={index} className="p-4 bg-gray-200 dark:bg-gray-700 rounded-lg">
                   <h3 className="font-bold">
-                    <a href={post.url} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                      {post.title}
+                    <a href={post.url} target="_blank" rel="noopener noreferrer" className="hover:underline" dangerouslySetInnerHTML={{ __html: escapeHTML(post.title) }}>
                     </a>
                   </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{post.text}</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400" dangerouslySetInnerHTML={{ __html: escapeHTML(post.text) }}></p>
                 </div>
               ))}
             </div>

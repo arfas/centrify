@@ -1,18 +1,24 @@
 import React, { useState } from 'react';
 
-function UrlSummarizer({ setSummary, setUiSummary, setPosts, setLoading }) {
+function UrlSummarizer({ setSummary, setUiSummary, setPosts, setLoading, setError, setTimestamp }) {
   const [input, setInput] = useState('');
   const [inputType, setInputType] = useState('url');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!input.trim()) {
+      setError('Please enter a valid URL or text.');
+      return;
+    }
+    setError('');
     setLoading(true);
     setSummary('');
     setUiSummary('');
     setPosts([]);
+    setTimestamp(null);
 
     const endpoint = inputType === 'url' ? '/summarize-url' : '/summarize-text';
-    const payload = inputType === 'url' ? { url: input } : { text: input };
+    const payload = inputType === 'url' ? { url: input.trim() } : { text: input.trim() };
 
     try {
       const response = await fetch(endpoint, {
@@ -23,12 +29,17 @@ function UrlSummarizer({ setSummary, setUiSummary, setPosts, setLoading }) {
         body: JSON.stringify(payload),
       });
       const data = await response.json();
-      setSummary(data.summary);
-      setUiSummary(data.ui_summary);
-      setPosts(data.posts);
+      if (response.ok && data.summary?.trim()) {
+        setSummary(data.summary);
+        setUiSummary(data.ui_summary);
+        setPosts(data.posts);
+        setTimestamp(data.timestamp);
+      } else {
+        setError(`No summary found for this ${inputType}.`);
+      }
     } catch (error) {
       console.error(`Error fetching ${inputType} summary:`, error);
-      setSummary(`Failed to generate ${inputType} summary.`);
+      setError(`Failed to generate ${inputType} summary.`);
     } finally {
       setLoading(false);
     }
