@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import Header from './Header';
+import SummarizerForm from './SummarizerForm';
+import History from './History';
+import Summary from './Summary';
+import Posts from './Posts';
 import UrlSummarizer from './UrlSummarizer';
-
-const WordCloud = window.ReactWordcloud;
-const Select = window.ReactSelect;
 
 const promptTemplates = [
   { value: 'basic', label: 'Basic Summary' },
@@ -14,6 +16,7 @@ const promptTemplates = [
 ];
 
 function App() {
+  // State variables
   const [topic, setTopic] = useState(null);
   const [summary, setSummary] = useState('');
   const [uiSummary, setUiSummary] = useState('');
@@ -31,6 +34,7 @@ function App() {
   const [error, setError] = useState('');
   const [timestamp, setTimestamp] = useState(null);
 
+  // Fetch trending topics on component mount
   useEffect(() => {
     const fetchTrendingTopics = async () => {
       try {
@@ -44,23 +48,27 @@ function App() {
     fetchTrendingTopics();
   }, []);
 
+  // Load dark mode preference from local storage
   useEffect(() => {
     const isDarkMode = localStorage.getItem('darkMode') === 'true';
     setDarkMode(isDarkMode);
   }, []);
 
+  // Toggle dark mode
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
     localStorage.setItem('darkMode', darkMode);
   }, [darkMode]);
 
+  // Load topic history from local storage
   useEffect(() => {
     const storedHistory = JSON.parse(localStorage.getItem('topicHistory')) || [];
     setHistory(storedHistory);
   }, []);
 
+  // Generate word cloud data from summary
   useEffect(() => {
-    if (summary && WordCloud) {
+    if (summary && window.ReactWordcloud) {
       const wordMap = {};
       summary.split(/[ ,.\n]+/).forEach((word) => {
         if (word) {
@@ -71,6 +79,7 @@ function App() {
     }
   }, [summary]);
 
+  // Handle form submission for Reddit summarization
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!topic || !topic.value.trim()) {
@@ -109,6 +118,7 @@ function App() {
     }
   };
 
+  // Handle Hacker News summarization
   const handleHackerNewsSummary = async () => {
     setError('');
     setLoading(true);
@@ -138,30 +148,19 @@ function App() {
     }
   };
 
+  // Escape HTML to prevent XSS attacks
   const escapeHTML = (str) => {
     return str.replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex items-center justify-center">
-      <div className="absolute top-4 right-4">
-        <button
-          onClick={() => setDarkMode(!darkMode)}
-          className="p-2 rounded-full bg-gray-200 dark:bg-gray-800"
-        >
-          {darkMode ? '☀️' : '🌙'}
-        </button>
-      </div>
+      <Header darkMode={darkMode} setDarkMode={setDarkMode} />
       <div className="max-w-md w-full bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md">
         <h1 className="text-2xl font-bold text-center mb-4">Reddit & Hacker News Summarizer</h1>
         {error && (
           <div className="p-4 bg-red-100 dark:bg-red-900 rounded-lg mb-4">
             <p className="text-center text-red-700 dark:text-red-300">{error}</p>
-          </div>
-        )}
-        {uiSummary && !loading && (
-          <div className="p-4 bg-blue-100 dark:bg-blue-900 rounded-lg mb-4">
-            <p className="text-center" dangerouslySetInnerHTML={{ __html: escapeHTML(uiSummary) }}></p>
           </div>
         )}
         <div className="flex justify-center mb-4 space-x-2">
@@ -180,165 +179,31 @@ function App() {
           </button>
         </div>
         {showUrlSummarizer && <UrlSummarizer setSummary={setSummary} setUiSummary={setUiSummary} setPosts={setPosts} setLoading={setLoading} setError={setError} setTimestamp={setTimestamp} />}
-        <form onSubmit={handleSubmit}>
-          <div className="mb-4">
-            <label htmlFor="topic" className="block text-gray-700 dark:text-gray-300 font-bold mb-2">
-              Reddit Topic
-            </label>
-            <Select
-              id="topic"
-              value={topic}
-              onChange={setTopic}
-              options={trendingTopics}
-              className="text-gray-900"
-              isClearable
-              isSearchable
-              placeholder="Select or type a topic..."
-            />
-          </div>
-          <div className="mb-4">
-            <label htmlFor="prompt" className="block text-gray-700 dark:text-gray-300 font-bold mb-2">
-              Prompt Template
-            </label>
-            <Select
-              id="prompt"
-              value={promptTemplate}
-              onChange={setPromptTemplate}
-              options={promptTemplates}
-              className="text-gray-900"
-            />
-          </div>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center">
-              <input
-                id="bullets"
-                type="radio"
-                name="format"
-                value="bullets"
-                checked={summaryFormat === 'bullets'}
-                onChange={(e) => setSummaryFormat(e.target.value)}
-                className="mr-2"
-              />
-              <label htmlFor="bullets">Bullets</label>
-            </div>
-            <div className="flex items-center">
-              <input
-                id="tldr"
-                type="radio"
-                name="format"
-                value="tldr"
-                checked={summaryFormat === 'tldr'}
-                onChange={(e) => setSummaryFormat(e.target.value)}
-                className="mr-2"
-              />
-              <label htmlFor="tldr">TL;DR</label>
-            </div>
-            <div className="flex items-center">
-              <input
-                id="sentiment"
-                type="checkbox"
-                checked={sentimentAnalysis}
-                onChange={(e) => setSentimentAnalysis(e.target.checked)}
-                className="mr-2"
-              />
-              <label htmlFor="sentiment">Sentiment Analysis</label>
-            </div>
-          </div>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center">
-              <input
-                id="short"
-                type="radio"
-                name="length"
-                value="short"
-                checked={summaryLength === 'short'}
-                onChange={(e) => setSummaryLength(e.target.value)}
-                className="mr-2"
-              />
-              <label htmlFor="short">Short</label>
-            </div>
-            <div className="flex items-center">
-              <input
-                id="medium"
-                type="radio"
-                name="length"
-                value="medium"
-                checked={summaryLength === 'medium'}
-                onChange={(e) => setSummaryLength(e.target.value)}
-                className="mr-2"
-              />
-              <label htmlFor="medium">Medium</label>
-            </div>
-            <div className="flex items-center">
-              <input
-                id="long"
-                type="radio"
-                name="length"
-                value="long"
-                checked={summaryLength === 'long'}
-                onChange={(e) => setSummaryLength(e.target.value)}
-                className="mr-2"
-              />
-              <label htmlFor="long">Long</label>
-            </div>
-          </div>
-          <button
-            type="submit"
-            className="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600"
-            disabled={loading || !topic}
-          >
-            {loading ? 'Summarizing...' : 'Summarize Reddit'}
-          </button>
-        </form>
-        {history.length > 0 && (
-          <div className="mt-4">
-            <h2 className="text-xl font-bold mb-2">Recent Topics</h2>
-            <div className="flex flex-wrap gap-2">
-              {history.map((item, index) => (
-                <button
-                  key={index}
-                  onClick={() => setTopic({ value: item, label: item })}
-                  className="bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded-full"
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {loading && (
-          <div className="flex justify-center items-center mt-4">
-            <div className="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-12 w-12"></div>
-          </div>
-        )}
-        {summary && !loading && WordCloud && (
-          <div className="mt-4 p-4 bg-gray-200 dark:bg-gray-700 rounded-lg">
-            <div className="flex justify-between items-center mb-2">
-              <h2 className="text-xl font-bold">Summary</h2>
-              {timestamp && <span className="text-sm text-gray-500 dark:text-gray-400">{new Date(timestamp * 1000).toLocaleString()}</span>}
-            </div>
-            <p dangerouslySetInnerHTML={{ __html: escapeHTML(summary) }}></p>
-            <div style={{ height: 300, width: '100%' }}>
-              <WordCloud words={words} />
-            </div>
-          </div>
-        )}
-        {posts.length > 0 && !loading && (
-          <div className="mt-4">
-            <h2 className="text-xl font-bold mb-2">Posts</h2>
-            <div className="space-y-4">
-              {posts.map((post, index) => (
-                <div key={index} className="p-4 bg-gray-200 dark:bg-gray-700 rounded-lg">
-                  <h3 className="font-bold">
-                    <a href={post.url} target="_blank" rel="noopener noreferrer" className="hover:underline" dangerouslySetInnerHTML={{ __html: escapeHTML(post.title) }}>
-                    </a>
-                  </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400" dangerouslySetInnerHTML={{ __html: escapeHTML(post.text) }}></p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <SummarizerForm
+          topic={topic}
+          setTopic={setTopic}
+          trendingTopics={trendingTopics}
+          promptTemplate={promptTemplate}
+          setPromptTemplate={setPromptTemplate}
+          summaryFormat={summaryFormat}
+          setSummaryFormat={setSummaryFormat}
+          sentimentAnalysis={sentimentAnalysis}
+          setSentimentAnalysis={setSentimentAnalysis}
+          summaryLength={summaryLength}
+          setSummaryLength={setSummaryLength}
+          handleSubmit={handleSubmit}
+          loading={loading}
+        />
+        <History history={history} setTopic={setTopic} />
+        <Summary
+          summary={summary}
+          uiSummary={uiSummary}
+          loading={loading}
+          words={words}
+          timestamp={timestamp}
+          escapeHTML={escapeHTML}
+        />
+        <Posts posts={posts} loading={loading} escapeHTML={escapeHTML} />
       </div>
     </div>
   );
