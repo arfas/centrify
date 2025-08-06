@@ -56,6 +56,7 @@ class SummaryRequest(BaseModel):
     summary_format: str = "text"
     sentiment_analysis: bool = False
     summary_length: str = "medium"
+    prompt_template: str = "basic"
 
 
 class Post(BaseModel):
@@ -174,12 +175,12 @@ def get_reddit_posts(topic: str, limit: int = 5):
     return filtered_posts
 
 
-def summarize_text(posts: list, topic: str, summary_format: str = "text", sentiment_analysis: bool = False, summary_length: str = "medium"):
+def summarize_text(posts: list, topic: str, summary_format: str = "text", sentiment_analysis: bool = False, summary_length: str = "medium", prompt_template: str = "basic"):
     if not posts:
         return "No meaningful posts found to summarize.", ""
 
     # Check cache first
-    cache_key = f"{topic}-{summary_format}-{sentiment_analysis}-{summary_length}"
+    cache_key = f"{topic}-{summary_format}-{sentiment_analysis}-{summary_length}-{prompt_template}"
     cached_summary = get_summary_from_db(cache_key)
     if cached_summary:
         summary, ui_summary, timestamp = cached_summary
@@ -188,7 +189,21 @@ def summarize_text(posts: list, topic: str, summary_format: str = "text", sentim
             return summary, ui_summary
 
     # Main summary prompt
-    prompt = f"Summarize the following posts on the topic '{topic}'."
+    if prompt_template == "basic":
+        prompt = f"Summarize the following social media posts about {topic} in a concise and neutral tone. Focus on key points, opinions, and emerging trends. Ignore spam or low-quality content."
+    elif prompt_template == "sentiment":
+        prompt = f"Analyze and summarize the following posts about {topic}. Identify the overall sentiment (positive, negative, mixed) and highlight representative comments for each perspective."
+    elif prompt_template == "comparative":
+        prompt = f"Given Reddit, Twitter, and YouTube posts about {topic}, summarize each platform’s dominant sentiment and highlight how the conversation differs between them."
+    elif prompt_template == "daily":
+        prompt = f"Provide a daily digest summary of online discussions about {topic} across Reddit, Twitter, and YouTube. Include major developments, shifts in sentiment, and any viral trends or keywords."
+    elif prompt_template == "executive":
+        prompt = f"Summarize the key insights from these social media discussions on {topic} as if reporting to an executive. Use bullet points, avoid slang, and emphasize impact and emerging patterns."
+    elif prompt_template == "ui":
+        prompt = f"Write a short and engaging summary of these posts on {topic}, suitable for display on a dashboard. Keep it under 100 words and highlight trending ideas or questions."
+    else:
+        prompt = f"Summarize the following posts on the topic '{topic}'."
+
     if summary_format == "bullets":
         prompt += " Use bullet points."
     elif summary_format == "tldr":
@@ -270,13 +285,13 @@ async def summarize_hackernews(request: Request):
 
 @app.get("/summarize", response_model=SummaryResponse)
 @limiter.limit("5/minute")
-async def summarize_get(request: Request, topic: str, summary_format: str = "text", sentiment_analysis: bool = False, summary_length: str = "medium"):
+async def summarize_get(request: Request, topic: str, summary_format: str = "text", sentiment_analysis: bool = False, summary_length: str = "medium", prompt_template: str = "basic"):
     if not is_valid_topic(topic):
         raise HTTPException(status_code=400, detail="Topic must be a non-empty string with at least 3 characters.")
     logger.info(f"Received GET request for topic: {topic}")
     try:
         posts = get_reddit_posts(topic)
-        summary, ui_summary = summarize_text(posts, topic, summary_format, sentiment_analysis, summary_length)
+        summary, ui_summary = summarize_text(posts, topic, summary_format, sentiment_analysis, summary_length, prompt_template)
         return {"summary": summary, "ui_summary": ui_summary, "posts": posts, "timestamp": time.time()}
     except HTTPException as e:
         raise e
@@ -296,7 +311,7 @@ async def summarize_post(request: Request, summary_request: SummaryRequest):
     logger.info(f"Received POST request for topic: {summary_request.topic}")
     try:
         posts = get_reddit_posts(summary_request.topic)
-        summary, ui_summary = summarize_text(posts, summary_request.topic, summary_request.summary_format, summary_request.sentiment_analysis, summary_request.summary_length)
+        summary, ui_summary = summarize_text(posts, summary_request.topic, summary_request.summary_format, summary_request.sentiment_analysis, summary_request.summary_length, summary_request.prompt_template)
         return {"summary": summary, "ui_summary": ui_summary, "posts": posts, "timestamp": time.time()}
     except HTTPException as e:
         raise e

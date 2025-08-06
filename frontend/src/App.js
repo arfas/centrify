@@ -4,6 +4,15 @@ import UrlSummarizer from './UrlSummarizer';
 const WordCloud = window.ReactWordcloud;
 const Select = window.ReactSelect;
 
+const promptTemplates = [
+  { value: 'basic', label: 'Basic Summary' },
+  { value: 'sentiment', label: 'Sentiment Analysis' },
+  { value: 'comparative', label: 'Comparative Summary' },
+  { value: 'daily', label: 'Daily Digest' },
+  { value: 'executive', label: 'Executive-Level Summary' },
+  { value: 'ui', label: 'Customized for UI Display' },
+];
+
 function App() {
   const [topic, setTopic] = useState(null);
   const [summary, setSummary] = useState('');
@@ -17,6 +26,7 @@ function App() {
   const [summaryFormat, setSummaryFormat] = useState('text');
   const [sentimentAnalysis, setSentimentAnalysis] = useState(false);
   const [summaryLength, setSummaryLength] = useState('medium');
+  const [promptTemplate, setPromptTemplate] = useState(promptTemplates[0]);
   const [showUrlSummarizer, setShowUrlSummarizer] = useState(false);
   const [error, setError] = useState('');
   const [timestamp, setTimestamp] = useState(null);
@@ -76,7 +86,7 @@ function App() {
     setTimestamp(null);
 
     try {
-      const response = await fetch(`/summarize?topic=${topic.value.trim()}&summary_format=${summaryFormat}&sentiment_analysis=${sentimentAnalysis}&summary_length=${summaryLength}`);
+      const response = await fetch(`/summarize?topic=${topic.value.trim()}&summary_format=${summaryFormat}&sentiment_analysis=${sentimentAnalysis}&summary_length=${summaryLength}&prompt_template=${promptTemplate.value}`);
       const data = await response.json();
       if (response.ok && data.summary?.trim()) {
         setSummary(data.summary);
@@ -184,6 +194,18 @@ function App() {
               isClearable
               isSearchable
               placeholder="Select or type a topic..."
+            />
+          </div>
+          <div className="mb-4">
+            <label htmlFor="prompt" className="block text-gray-700 dark:text-gray-300 font-bold mb-2">
+              Prompt Template
+            </label>
+            <Select
+              id="prompt"
+              value={promptTemplate}
+              onChange={setPromptTemplate}
+              options={promptTemplates}
+              className="text-gray-900"
             />
           </div>
           <div className="flex items-center justify-between mb-4">
