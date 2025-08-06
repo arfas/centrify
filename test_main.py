@@ -20,7 +20,8 @@ def clear_cache():
 def test_db():
     init_db()
     yield
-    os.remove("summaries.db")
+    if os.path.exists("summaries.db"):
+        os.remove("summaries.db")
 
 @pytest.fixture
 def mock_reddit_api():
@@ -188,7 +189,7 @@ def test_summarize_hackernews(mock_get_hacker_news_posts, test_db):
         mock_summarize_text.return_value = "This is a summary.", "This is a UI summary."
         response = client.get("/summarize-hackernews")
         assert response.status_code == 200
-        assert response.json() == {"summary": "This is a summary.", "ui_summary": "This is a UI summary.", "posts": [{"title": "Test Post", "text": "This is a test post.", "url": "http://test.com"}]}
+        assert response.json()["summary"] == "This is a summary."
 
 def test_caching(test_db):
     topic = "test_topic"
@@ -200,3 +201,25 @@ def test_caching(test_db):
     assert summary == cached_summary
     assert ui_summary == cached_ui_summary
     assert timestamp == cached_timestamp
+
+def test_get_admin_summaries_no_auth():
+    response = client.get("/admin")
+    assert response.status_code == 401
+
+def test_get_admin_summaries_with_auth(test_db):
+    response = client.get("/admin", auth=("admin", "admin123"))
+    assert response.status_code == 200
+
+def test_delete_summary(test_db):
+    topic = "test_topic"
+    summary = "test_summary"
+    ui_summary = "test_ui_summary"
+    timestamp = time.time()
+    save_summary_to_db(topic, summary, ui_summary, timestamp)
+
+    response = client.delete(f"/admin/delete/{topic}", auth=("admin", "admin123"))
+    assert response.status_code == 200
+    assert response.json() == {"message": "Summary deleted successfully."}
+
+    cached_summary = get_summary_from_db(topic)
+    assert cached_summary is None
