@@ -2,9 +2,12 @@ import os
 import time
 import logging
 import requests
-from fastapi import FastAPI, HTTPException, Request
+import secrets
+import sqlite3
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
@@ -21,6 +24,24 @@ load_dotenv()
 init_db()
 
 limiter = Limiter(key_func=get_remote_address)
+
+security = HTTPBasic()
+
+# Hardcoded credentials (should be moved to environment variables)
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "admin123"
+
+def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
+    correct_password = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -149,6 +170,30 @@ async def summarize_post(request: Request, summary_request: SummaryRequest):
     except Exception as e:
         logger.error(f"Exception in summarize_post: {e}")
         raise HTTPException(status_code=500, detail=f"Error generating summary: {e}")
+
+@app.get("/admin")
+async def get_admin_summaries(username: str = Depends(get_current_username)):
+    conn = sqlite3.connect('summaries.db')
+    c = conn.cursor()
+    c.execute("SELECT topic, summary, ui_summary, timestamp FROM summaries")
+    summaries = c.fetchall()
+    conn.close()
+    return summaries
+
+@app.delete("/admin/delete/{topic}")
+async def delete_summary(topic: str, username: str = Depends(get_current_username)):
+    conn = sqlite3.connect('summaries.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM summaries WHERE topic=?", (topic,))
+    conn.commit()
+    conn.close()
+    return {"message": "Summary deleted successfully."}
+
+from fastapi.responses import FileResponse
+
+@app.get("/admin-ui")
+async def get_admin_ui():
+    return FileResponse("admin.html")
 
 if __name__ == "__main__":
     import uvicorn

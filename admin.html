@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Panel</title>
+</head>
+<body>
+    <h1>Admin Panel</h1>
+    <table border="1">
+        <thead>
+            <tr>
+                <th>Topic</th>
+                <th>Summary</th>
+                <th>UI Summary</th>
+                <th>Timestamp</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody id="summaries">
+        </tbody>
+    </table>
+
+    <script>
+        async function fetchSummaries() {
+            const response = await fetch('/admin', {
+                headers: {
+                    'Authorization': 'Basic ' + btoa('admin:admin123')
+                }
+            });
+            const summaries = await response.json();
+            const summariesTbody = document.getElementById('summaries');
+            summariesTbody.innerHTML = '';
+            for (const summary of summaries) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${summary[0]}</td>
+                    <td>${summary[1]}</td>
+                    <td>${summary[2]}</td>
+                    <td>${new Date(summary[3] * 1000).toLocaleString()}</td>
+                    <td><button onclick="deleteSummary('${summary[0]}')">Delete</button></td>
+                `;
+                summariesTbody.appendChild(tr);
+            }
+        }
+
+        async function deleteSummary(topic) {
+            if (confirm('Are you sure you want to delete this summary?')) {
+                await fetch(`/admin/delete/${topic}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': 'Basic ' + btoa('admin:admin123')
+                    }
+                });
+                fetchSummaries();
+            }
+        }
+
+        fetchSummaries();
+    </script>
+</body>
+</html>
