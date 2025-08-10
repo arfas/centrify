@@ -8,3 +8,5 @@ requests-mock
 slowapi
 beautifulsoup4
 APScheduler
+cryptography
+python-jose
