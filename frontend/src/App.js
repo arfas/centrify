@@ -16,7 +16,6 @@ const promptTemplates = [
 ];
 
 function App() {
-  // State variables
   const [topic, setTopic] = useState(null);
   const [summary, setSummary] = useState('');
   const [uiSummary, setUiSummary] = useState('');
@@ -33,8 +32,8 @@ function App() {
   const [showUrlSummarizer, setShowUrlSummarizer] = useState(false);
   const [error, setError] = useState('');
   const [timestamp, setTimestamp] = useState(null);
+  const [user, setUser] = useState(null);
 
-  // Fetch trending topics on component mount
   useEffect(() => {
     const fetchTrendingTopics = async () => {
       try {
@@ -48,25 +47,21 @@ function App() {
     fetchTrendingTopics();
   }, []);
 
-  // Load dark mode preference from local storage
   useEffect(() => {
     const isDarkMode = localStorage.getItem('darkMode') === 'true';
     setDarkMode(isDarkMode);
   }, []);
 
-  // Toggle dark mode
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
     localStorage.setItem('darkMode', darkMode);
   }, [darkMode]);
 
-  // Load topic history from local storage
   useEffect(() => {
     const storedHistory = JSON.parse(localStorage.getItem('topicHistory')) || [];
     setHistory(storedHistory);
   }, []);
 
-  // Generate word cloud data from summary
   useEffect(() => {
     if (summary && window.ReactWordcloud) {
       const wordMap = {};
@@ -79,7 +74,6 @@ function App() {
     }
   }, [summary]);
 
-  // Handle form submission for Reddit summarization
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!topic || !topic.value.trim()) {
@@ -118,7 +112,6 @@ function App() {
     }
   };
 
-  // Handle Hacker News summarization
   const handleHackerNewsSummary = async () => {
     setError('');
     setLoading(true);
@@ -148,7 +141,6 @@ function App() {
     }
   };
 
-  // Escape HTML to prevent XSS attacks
   const escapeHTML = (str) => {
     return str.replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
@@ -158,6 +150,11 @@ function App() {
       <Header darkMode={darkMode} setDarkMode={setDarkMode} />
       <div className="max-w-md w-full bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md">
         <h1 className="text-2xl font-bold text-center mb-4">Reddit & Hacker News Summarizer</h1>
+        <div className="flex justify-center mb-4">
+          <a href="/auth/reddit/start" className="bg-red-500 text-white py-2 px-4 rounded-lg hover:bg-red-600">
+            Connect Reddit
+          </a>
+        </div>
         {error && (
           <div className="p-4 bg-red-100 dark:bg-red-900 rounded-lg mb-4">
             <p className="text-center text-red-700 dark:text-red-300">{error}</p>

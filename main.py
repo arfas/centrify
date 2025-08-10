@@ -5,7 +5,10 @@ import requests
 import secrets
 import sqlite3
 from fastapi import FastAPI, HTTPException, Request, Depends
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from slowapi.util import get_remote_address
@@ -25,13 +28,32 @@ init_db()
 
 limiter = Limiter(key_func=get_remote_address)
 
+# In a real app, this should be a securely stored secret
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = "a_very_secret_key"
+    print(f"Generated new secret key. Please set this in your environment variables: SECRET_KEY={SECRET_KEY}")
+
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
 security = HTTPBasic()
 
 # Hardcoded credentials (should be moved to environment variables)
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
 
-def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
+def get_current_admin_user(credentials: HTTPBasicCredentials = Depends(security)):
     correct_username = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
     correct_password = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
     if not (correct_username and correct_password):
@@ -41,6 +63,21 @@ def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
+
+def get_current_user(token: str = Depends(HTTPBasic())):
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    return username
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -99,6 +136,62 @@ async def summarize_url(request: Request, url_request: UrlRequest):
     except Exception as e:
         logger.error(f"Exception in summarize_url: {e}")
         raise HTTPException(status_code=500, detail=f"Error generating summary: {e}")
+
+@app.get("/auth/reddit/start")
+async def start_reddit_auth():
+    # In a real app, you'd use a library to build this URL
+    # and include a `state` parameter for CSRF protection.
+    auth_url = (
+        f"https://www.reddit.com/api/v1/authorize?client_id={os.getenv('REDDIT_CLIENT_ID')}"
+        "&response_type=code&state=random_string&redirect_uri=http://localhost:8000/auth/reddit/callback"
+        "&duration=permanent&scope=identity read mysubreddits"
+    )
+    return RedirectResponse(url=auth_url)
+
+@app.get("/auth/reddit/callback")
+async def reddit_callback(code: str, state: str):
+    # Here you would verify the `state` parameter to prevent CSRF.
+
+    auth = requests.auth.HTTPBasicAuth(os.getenv('REDDIT_CLIENT_ID'), os.getenv('REDDIT_CLIENT_SECRET'))
+    post_data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": "http://localhost:8000/auth/reddit/callback",
+    }
+    headers = {"User-Agent": os.getenv("REDDIT_USER_AGENT")}
+
+    token_response = requests.post(
+        "https://www.reddit.com/api/v1/access_token",
+        auth=auth,
+        data=post_data,
+        headers=headers
+    )
+    token_data = token_response.json()
+
+    # Get user identity
+    headers['Authorization'] = f"bearer {token_data['access_token']}"
+    user_response = requests.get("https://oauth.reddit.com/api/v1/me", headers=headers)
+    user_data = user_response.json()
+
+    username = user_data['name']
+    user_id = create_user(username)
+
+    create_connected_account(
+        user_id=user_id,
+        platform='reddit',
+        access_token=token_data['access_token'],
+        refresh_token=token_data.get('refresh_token'),
+        expires_at=time.time() + token_data['expires_in'],
+        scope=token_data['scope']
+    )
+
+    # For now, just return a success message.
+    # In a real app, you'd create a session for the user (e.g., a JWT)
+    # and redirect them to their dashboard.
+    access_token = create_access_token(data={"sub": username})
+    response = RedirectResponse(url="/")
+    response.set_cookie(key="access_token", value=access_token, httponly=True)
+    return response
 
 @app.post("/summarize-text", response_model=SummaryResponse)
 @limiter.limit("5/minute")
@@ -172,7 +265,7 @@ async def summarize_post(request: Request, summary_request: SummaryRequest):
         raise HTTPException(status_code=500, detail=f"Error generating summary: {e}")
 
 @app.get("/admin")
-async def get_admin_summaries(username: str = Depends(get_current_username)):
+async def get_admin_summaries(username: str = Depends(get_current_admin_user)):
     conn = sqlite3.connect('summaries.db')
     c = conn.cursor()
     c.execute("SELECT topic, summary, ui_summary, timestamp FROM summaries")
@@ -181,7 +274,7 @@ async def get_admin_summaries(username: str = Depends(get_current_username)):
     return summaries
 
 @app.delete("/admin/delete/{topic}")
-async def delete_summary(topic: str, username: str = Depends(get_current_username)):
+async def delete_summary(topic: str, username: str = Depends(get_current_admin_user)):
     conn = sqlite3.connect('summaries.db')
     c = conn.cursor()
     c.execute("DELETE FROM summaries WHERE topic=?", (topic,))
